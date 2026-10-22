@@ -1,0 +1,35 @@
+{
+  "name": "owner888/pig-fff",
+  "description": "Fast & Git-aware smart search extension for pig (ffgrep & fffind)",
+  "type": "library",
+  "license": "MIT",
+  "keywords": [
+    "pig-package",
+    "pig",
+    "extension",
+    "search",
+    "grep",
+    "fff",
+    "git-aware"
+  ],
+  "authors": [
+    {
+      "name": "the developer"
+    }
+  ],
+  "require": {
+    "php": ">=8.3"
+  },
+  "autoload": {
+    "psr-4": {
+      "PigFff\\": "extensions/"
+    }
+  },
+  "extra": {
+    "pig": {
+      "extensions": [
+        "./extensions/fff.php"
+      ]
+    }
+  }
+}
