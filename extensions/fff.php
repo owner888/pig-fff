@@ -28,7 +28,7 @@ require_once __DIR__ . '/FastFind.php';
 return static function (ExtensionApi $pi): void {
     $cwd = getcwd() ?: '.';
     $git = new GitContext($cwd);
-    $frecency = new FrecencyTracker(FrecencyTracker::defaultStorageFile());
+    $frecency = new FrecencyTracker(FrecencyTracker::defaultStorageFile(), $cwd);
     $grepEngine = new FastGrep($cwd, $git, $frecency);
     $findEngine = new FastFind($cwd, $git, $frecency);
 

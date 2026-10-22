@@ -9,20 +9,35 @@ namespace PigFff;
  *
  * Automatically learns which files the agent consults most often and
  * decays scores over time, mimicking modern input method candidate ranking.
+ *
+ * Scoped strictly by workspace directory (cwd) to prevent cross-project pollution.
  */
 final class FrecencyTracker
 {
     /**
+     * Full multitenant store indexed by workspace root:
+     * [scopePath => [relativePath => ['count' => int, 'last_time' => int]]]
+     *
+     * @var array<string, array<string, array{count: int, last_time: int}>>
+     */
+    private array $allScopes = [];
+
+    /**
+     * Active scope's records for fast lookup.
+     *
      * @var array<string, array{count: int, last_time: int}>
      */
     private array $records = [];
 
+    private readonly string $scopeKey;
     private bool $dirty = false;
 
     public function __construct(
         private readonly string $storageFile,
-        private readonly int $maxEntries = 500,
+        string $cwd,
+        private readonly int $maxEntriesPerScope = 300,
     ) {
+        $this->scopeKey = realpath($cwd) ?: $cwd;
         $this->load();
     }
 
@@ -40,6 +55,11 @@ final class FrecencyTracker
             return $dir . '/fff-frecency.json';
         }
         return sys_get_temp_dir() . '/pig-fff-frecency.json';
+    }
+
+    public function getScope(): string
+    {
+        return $this->scopeKey;
     }
 
     /**
@@ -101,15 +121,17 @@ final class FrecencyTracker
             return;
         }
 
-        // Keep only top entries by score
-        if (count($this->records) > $this->maxEntries) {
+        // Prune active scope to limit
+        if (count($this->records) > $this->maxEntriesPerScope) {
             uasort($this->records, function (array $a, array $b): int {
                 $scoreA = $this->scoreOfRecord($a);
                 $scoreB = $this->scoreOfRecord($b);
                 return $scoreB <=> $scoreA;
             });
-            $this->records = array_slice($this->records, 0, $this->maxEntries, true);
+            $this->records = array_slice($this->records, 0, $this->maxEntriesPerScope, true);
         }
+
+        $this->allScopes[$this->scopeKey] = $this->records;
 
         $dir = dirname($this->storageFile);
         if (!is_dir($dir)) {
@@ -118,7 +140,7 @@ final class FrecencyTracker
 
         @file_put_contents(
             $this->storageFile,
-            json_encode($this->records, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES),
+            json_encode($this->allScopes, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES),
             LOCK_EX
         );
 
@@ -127,6 +149,9 @@ final class FrecencyTracker
 
     private function load(): void
     {
+        $this->records = [];
+        $this->allScopes = [];
+
         if (!is_file($this->storageFile)) {
             return;
         }
@@ -137,15 +162,29 @@ final class FrecencyTracker
         }
 
         $data = json_decode($raw, true);
-        if (is_array($data)) {
-            foreach ($data as $path => $item) {
-                if (is_array($item) && isset($item['count'], $item['last_time'])) {
-                    $this->records[(string) $path] = [
-                        'count' => (int) $item['count'],
-                        'last_time' => (int) $item['last_time'],
-                    ];
-                }
+        if (!is_array($data)) {
+            return;
+        }
+
+        // Backward compatibility: If it's a legacy flat structure without scopes, wrap under root
+        $isScoped = false;
+        foreach ($data as $k => $v) {
+            if (is_array($v) && (str_starts_with((string) $k, '/') || str_contains((string) $k, ':\\'))) {
+                $isScoped = true;
+                break;
             }
+        }
+
+        if ($isScoped) {
+            /** @var array<string, array<string, array{count: int, last_time: int}>> $data */
+            $this->allScopes = $data;
+            if (isset($data[$this->scopeKey]) && is_array($data[$this->scopeKey])) {
+                $this->records = $data[$this->scopeKey];
+            }
+        } else {
+            // Legacy format migration
+            $this->allScopes = [];
+            $this->records = [];
         }
     }
 
