@@ -10,25 +10,27 @@ use Pig\CodingAgent\Extensions\ExtensionApi;
 use Pig\CodingAgent\Hooks\HookContext;
 use PigFff\FastFind;
 use PigFff\FastGrep;
+use PigFff\FrecencyTracker;
 use PigFff\GitContext;
 
 require_once __DIR__ . '/GitStatusProvider.php';
 require_once __DIR__ . '/GitContext.php';
+require_once __DIR__ . '/FrecencyTracker.php';
 require_once __DIR__ . '/FastGrep.php';
 require_once __DIR__ . '/FastFind.php';
 
 /**
  * Fast & Git-aware smart search extension for pig.
  *
- * Provides `ffgrep` and `fffind` with instant Git-state boosting:
- * modified and untracked files are ranked at the top of results,
- * dramatically cutting token usage and eliminating cache drift.
+ * Provides `ffgrep` and `fffind` with instant Git-state boosting and
+ * input-method style Frecency (Frequency + Recency) ranking.
  */
 return static function (ExtensionApi $pi): void {
     $cwd = getcwd() ?: '.';
     $git = new GitContext($cwd);
-    $grepEngine = new FastGrep($cwd, $git);
-    $findEngine = new FastFind($cwd, $git);
+    $frecency = new FrecencyTracker(FrecencyTracker::defaultStorageFile());
+    $grepEngine = new FastGrep($cwd, $git, $frecency);
+    $findEngine = new FastFind($cwd, $git, $frecency);
 
     // 1. Tool: ffgrep (Content Search with Git-Aware Boosting)
     $pi->registerTool(new CustomTool(
@@ -150,7 +152,7 @@ return static function (ExtensionApi $pi): void {
     // 3. Command: /fff-status
     $pi->registerCommand(
         'fff-status',
-        static function (string $args, HookContext $ctx) use ($git): void {
+        static function (string $args, HookContext $ctx) use ($git, $frecency): void {
             $git->refresh();
             $changes = $git->allChanges();
             $repo = $git->isGitRepository() ? 'Yes' : 'No';
@@ -162,7 +164,8 @@ return static function (ExtensionApi $pi): void {
                 . "Git Repository: {$repo}\n"
                 . "Active Modified/Untracked Files: " . count($changes) . "\n"
                 . "Ripgrep (rg): {$whichRg}\n"
-                . "Fd: {$whichFd}\n";
+                . "Fd: {$whichFd}\n"
+                . "Frecency DB: " . FrecencyTracker::defaultStorageFile() . "\n";
 
             if ($changes !== []) {
                 $info .= "\nTop Modified Files:\n";
@@ -176,12 +179,20 @@ return static function (ExtensionApi $pi): void {
                 }
             }
 
+            $topHot = $frecency->topEntries(5);
+            if ($topHot !== []) {
+                $info .= "\nTop Frecency Hot Files (Learned Candidate Ranking):\n";
+                foreach ($topHot as $path => $data) {
+                    $info .= "  [score: {$data['score']}, hits: {$data['count']}] {$path}\n";
+                }
+            }
+
             if ($ctx->hasUi) {
                 $ctx->ui->notify($info, 'info');
             } else {
                 echo $info, "\n";
             }
         },
-        description: 'Display pig-fff search engine diagnostics and git boost status',
+        description: 'Display pig-fff search engine diagnostics, git boost status and frecency memory',
     );
 };

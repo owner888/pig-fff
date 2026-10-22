@@ -7,6 +7,7 @@ Provides high-performance `ffgrep` and `fffind` tools that prioritize active, mo
 ## Key Features
 
 - **⚡ Real-Time Git-Aware Boosting**: Files currently modified, staged, or untracked in Git are boosted to the very top of search results with explicit `[git: status]` badges. The agent sees changes immediately.
+- **🧠 IME-Style Frecency Memory**: Automatically learns file access patterns and query hits across sessions (stored in `~/.pig/agent/fff-frecency.json`). Frequently and recently examined files earn a `[hot]` badge and climb up the rankings, just like your favorite IME candidate words.
 - **🛡️ 100% Stateless & Zero Cache Drift**: Unlike in-memory pre-indexed engines that desync when external agents (like Claude or IDEs) modify code, `pig-fff` inspects real-time Git status alongside disk contents. No stale cache, zero manual rescan needed.
 - **🚀 Dual-Engine Execution**: Powered by `ripgrep` (`rg`) and `fd` when available on the host machine for microsecond-level scans, with pure PHP fallback when external binaries are not present.
 - **🔍 Multi-Pattern OR Search**: Supports searching multiple literal patterns simultaneously using `patterns: ["Foo", "Bar"]`.

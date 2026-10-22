@@ -16,6 +16,7 @@ final class FastFind
     public function __construct(
         private readonly string $cwd,
         private readonly GitStatusProvider $git,
+        private readonly ?FrecencyTracker $frecency = null,
     ) {
     }
 
@@ -177,7 +178,7 @@ final class FastFind
     }
 
     /**
-     * Rank results: Git-modified files placed at the top.
+     * Rank results: Git-modified files at top, followed by frecency-scored hot files.
      *
      * @param list<string> $files
      * @return array{content: string, totalFiles: int, gitBoostedFiles: int}
@@ -186,21 +187,7 @@ final class FastFind
     {
         $this->git->refresh();
 
-        $boosted = [];
-        $regular = [];
-
-        foreach ($files as $file) {
-            $status = $this->git->statusOf($file);
-            if ($status !== null) {
-                $boosted[] = ['path' => $file, 'status' => $status];
-            } else {
-                $regular[] = ['path' => $file, 'status' => null];
-            }
-        }
-
-        $all = array_merge($boosted, $regular);
-
-        if ($all === []) {
+        if ($files === []) {
             return [
                 'content' => 'No files found matching pattern.',
                 'totalFiles' => 0,
@@ -208,17 +195,60 @@ final class FastFind
             ];
         }
 
-        $count = 0;
-        $boostedCount = count($boosted);
-        $lines = [];
+        /** @var array<string, array{path: string, status: ?string, frecency: float, score: float}> $scored */
+        $scored = [];
 
-        foreach ($all as $item) {
+        foreach ($files as $file) {
+            $status = $this->git->statusOf($file);
+            $frecencyScore = $this->frecency?->scoreOf($file) ?? 0.0;
+
+            // Tier 1: Git-modified files (+10,000)
+            // Tier 2: Frecency score
+            // Tier 3: Shallow paths
+            $depth = substr_count($file, '/');
+            $depthBonus = max(0.0, (10.0 - $depth) * 0.5);
+
+            $compositeScore = ($status !== null ? 10000.0 : 0.0) + $frecencyScore + $depthBonus;
+
+            $scored[$file] = [
+                'path' => $file,
+                'status' => $status,
+                'frecency' => $frecencyScore,
+                'score' => $compositeScore,
+            ];
+        }
+
+        uasort($scored, static fn (array $a, array $b): int => $b['score'] <=> $a['score']);
+
+        $count = 0;
+        $boostedCount = 0;
+        $lines = [];
+        $hitFiles = [];
+
+        foreach ($scored as $item) {
             if ($count >= $limit) {
                 break;
             }
-            $badge = $item['status'] !== null ? "  [git: {$item['status']}]" : '';
-            $lines[] = $item['path'] . $badge;
+
+            $badges = [];
+            if ($item['status'] !== null) {
+                $badges[] = "git: {$item['status']}";
+                $boostedCount++;
+            } elseif ($item['frecency'] >= 20.0) {
+                $badges[] = 'hot';
+            }
+
+            $badgeStr = $badges !== [] ? '  [' . implode(', ', $badges) . ']' : '';
+            $lines[] = $item['path'] . $badgeStr;
+            $hitFiles[] = $item['path'];
             $count++;
+        }
+
+        if ($this->frecency !== null) {
+            foreach ($hitFiles as $f) {
+                $this->frecency->recordHit($f);
+            }
+            $this->frecency->save();
         }
 
         $summary = "Found {$count} files";

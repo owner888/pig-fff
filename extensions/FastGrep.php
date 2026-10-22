@@ -18,6 +18,7 @@ final class FastGrep
     public function __construct(
         private readonly string $cwd,
         private readonly GitStatusProvider $git,
+        private readonly ?FrecencyTracker $frecency = null,
     ) {
     }
 
@@ -188,14 +189,15 @@ final class FastGrep
 
                 if ($path !== '') {
                     $rel = $this->toRelative($path);
-                    $fileMatches[$rel][] = [
-                        'line' => $lineNum,
-                        'text' => rtrim($lineText, "\r\n"),
-                    ];
-                    $totalCount++;
+                    if (!isset($fileMatches[$rel]) || count($fileMatches[$rel]) < 20) {
+                        $fileMatches[$rel][] = [
+                            'line' => $lineNum,
+                            'text' => rtrim($lineText, "\r\n"),
+                        ];
+                        $totalCount++;
+                    }
 
-                    if ($totalCount >= $limit * 3) {
-                        // Gather enough candidates for git-ranking
+                    if ($totalCount >= 500 || (count($fileMatches) >= 50 && $totalCount >= $limit * 5)) {
                         break;
                     }
                 }
@@ -321,7 +323,7 @@ final class FastGrep
     }
 
     /**
-     * Rank results: Git-modified files placed at the top with status badges.
+     * Rank results: Git-modified files at top, followed by frecency-scored hot files.
      *
      * @param array<string, list<array{line: int, text: string}>> $fileMatches
      * @return array{content: string, totalMatches: int, gitBoostedMatches: int}
@@ -330,22 +332,7 @@ final class FastGrep
     {
         $this->git->refresh();
 
-        // Separate boosted and regular files
-        $boosted = [];
-        $regular = [];
-
-        foreach ($fileMatches as $file => $matches) {
-            $status = $this->git->statusOf($file);
-            if ($status !== null) {
-                $boosted[$file] = ['status' => $status, 'matches' => $matches];
-            } else {
-                $regular[$file] = ['status' => null, 'matches' => $matches];
-            }
-        }
-
-        $allFiles = array_merge($boosted, $regular);
-
-        if ($allFiles === []) {
+        if ($fileMatches === []) {
             return [
                 'content' => 'No matches found.',
                 'totalMatches' => 0,
@@ -353,18 +340,53 @@ final class FastGrep
             ];
         }
 
+        /** @var array<string, array{status: ?string, frecency: float, score: float, matches: list<array{line: int, text: string}>}> $scored */
+        $scored = [];
+
+        foreach ($fileMatches as $file => $matches) {
+            $status = $this->git->statusOf($file);
+            $frecencyScore = $this->frecency?->scoreOf($file) ?? 0.0;
+
+            // Tier 1: Git-modified files get supreme boost (+10,000)
+            // Tier 2: Frequently & recently accessed files (+frecency)
+            // Tier 3: Shallow paths slight preference
+            $depth = substr_count($file, '/');
+            $depthBonus = max(0.0, (10.0 - $depth) * 0.5);
+
+            $compositeScore = ($status !== null ? 10000.0 : 0.0) + $frecencyScore + $depthBonus;
+
+            $scored[$file] = [
+                'status' => $status,
+                'frecency' => $frecencyScore,
+                'score' => $compositeScore,
+                'matches' => $matches,
+            ];
+        }
+
+        // Sort descending by composite score
+        uasort($scored, static fn (array $a, array $b): int => $b['score'] <=> $a['score']);
+
         $output = '';
         $matchCount = 0;
         $boostedCount = 0;
+        $hitFiles = [];
 
-        foreach ($allFiles as $file => $data) {
+        foreach ($scored as $file => $data) {
             if ($matchCount >= $limit) {
                 break;
             }
 
-            $badge = $data['status'] !== null ? " [git: {$data['status']}]" : '';
-            $header = "{$file}{$badge}\n";
+            $badges = [];
+            if ($data['status'] !== null) {
+                $badges[] = "git: {$data['status']}";
+            } elseif ($data['frecency'] >= 20.0) {
+                $badges[] = 'hot';
+            }
+
+            $badgeStr = $badges !== [] ? ' [' . implode(', ', $badges) . ']' : '';
+            $header = "{$file}{$badgeStr}\n";
             $output .= $header;
+            $hitFiles[] = $file;
 
             foreach ($data['matches'] as $m) {
                 if ($matchCount >= $limit) {
@@ -390,6 +412,14 @@ final class FastGrep
             }
 
             $output .= "\n";
+        }
+
+        // Record hits for the files presented to the agent
+        if ($this->frecency !== null) {
+            foreach ($hitFiles as $f) {
+                $this->frecency->recordHit($f);
+            }
+            $this->frecency->save();
         }
 
         $summary = "Found {$matchCount} matches across " . count($fileMatches) . " files";
