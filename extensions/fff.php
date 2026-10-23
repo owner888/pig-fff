@@ -195,4 +195,24 @@ return static function (ExtensionApi $pi): void {
         },
         description: 'Display pig-fff search engine diagnostics, git boost status and frecency memory',
     );
+
+    // 4. Hook: Auto-boost files directly read, edited, or written by the agent
+    $pi->on('tool_result', static function ($event) use ($frecency, $cwd): void {
+        if ($event->isError || !in_array($event->toolName, ['read', 'edit', 'write'], true)) {
+            return;
+        }
+
+        $path = $event->input['path'] ?? null;
+        if (!is_string($path) || $path === '') {
+            return;
+        }
+
+        $clean = ltrim(str_replace(rtrim($cwd, '/') . '/', '', $path), './');
+        if ($clean !== '' && FastGrep::noiseCategory($clean) === null) {
+            // Edit & write get 5x boost, read gets 2x boost
+            $weight = in_array($event->toolName, ['edit', 'write'], true) ? 5 : 2;
+            $frecency->recordHit($clean, $weight);
+            $frecency->save();
+        }
+    });
 };

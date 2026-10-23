@@ -65,7 +65,7 @@ final class FrecencyTracker
     /**
      * Record a hit (match opened or examined) for a given relative path.
      */
-    public function recordHit(string $relPath): void
+    public function recordHit(string $relPath, int $weight = 1): void
     {
         $clean = ltrim($relPath, './');
         if ($clean === '') {
@@ -73,12 +73,13 @@ final class FrecencyTracker
         }
 
         $now = time();
+        $inc = max(1, $weight);
         if (isset($this->records[$clean])) {
-            $this->records[$clean]['count']++;
+            $this->records[$clean]['count'] += $inc;
             $this->records[$clean]['last_time'] = $now;
         } else {
             $this->records[$clean] = [
-                'count' => 1,
+                'count' => $inc,
                 'last_time' => $now,
             ];
         }

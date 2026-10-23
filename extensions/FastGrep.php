@@ -206,7 +206,7 @@ final class FastGrep
 
         pclose($handle);
 
-        return $this->rankAndFormat($fileMatches, $limit);
+        return $this->rankAndFormat($fileMatches, $patterns, $limit);
     }
 
     /**
@@ -270,7 +270,7 @@ final class FastGrep
             }
         }
 
-        return $this->rankAndFormat($fileMatches, $limit);
+        return $this->rankAndFormat($fileMatches, $patterns, $limit);
     }
 
     /**
@@ -322,13 +322,30 @@ final class FastGrep
         return $absPath;
     }
 
+    public static function noiseCategory(string $path): ?string
+    {
+        $base = basename($path);
+        if (in_array($base, ['composer.lock', 'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'Cargo.lock'], true)) {
+            return 'lockfile';
+        }
+        if (str_ends_with($base, '.min.js') || str_ends_with($base, '.min.css')) {
+            return 'minified';
+        }
+        if (str_ends_with($base, '.map') || str_ends_with($base, '.bundle.js')) {
+            return 'build';
+        }
+        return null;
+    }
+
     /**
-     * Rank results: Git-modified files at top, followed by frecency-scored hot files.
+     * Rank results: Git-modified files at top, followed by multi-pattern coverage,
+     * frecency hot files, and sinking noise/lockfiles to the very bottom.
      *
      * @param array<string, list<array{line: int, text: string}>> $fileMatches
+     * @param list<string> $patterns
      * @return array{content: string, totalMatches: int, gitBoostedMatches: int}
      */
-    private function rankAndFormat(array $fileMatches, int $limit): array
+    private function rankAndFormat(array $fileMatches, array $patterns, int $limit): array
     {
         $this->git->refresh();
 
@@ -340,24 +357,46 @@ final class FastGrep
             ];
         }
 
-        /** @var array<string, array{status: ?string, frecency: float, score: float, matches: list<array{line: int, text: string}>}> $scored */
+        /** @var array<string, array{status: ?string, frecency: float, noise: ?string, matchedPatterns: int, score: float, matches: list<array{line: int, text: string}>}> $scored */
         $scored = [];
 
         foreach ($fileMatches as $file => $matches) {
             $status = $this->git->statusOf($file);
             $frecencyScore = $this->frecency?->scoreOf($file) ?? 0.0;
+            $noise = self::noiseCategory($file);
 
             // Tier 1: Git-modified files get supreme boost (+10,000)
-            // Tier 2: Frequently & recently accessed files (+frecency)
-            // Tier 3: Shallow paths slight preference
+            $gitBonus = $status !== null ? 10000.0 : 0.0;
+
+            // Tier 2: Multi-pattern coverage boost (unique patterns matched in this file)
+            $matchedPatterns = 0;
+            if (count($patterns) > 1) {
+                foreach ($patterns as $pat) {
+                    foreach ($matches as $m) {
+                        if (stripos($m['text'], $pat) !== false) {
+                            $matchedPatterns++;
+                            break;
+                        }
+                    }
+                }
+            }
+            $coverageBonus = $matchedPatterns > 1 ? ($matchedPatterns * 500.0) : 0.0;
+
+            // Tier 3: Frecency score
+            // Tier 4: Shallow paths slight preference
             $depth = substr_count($file, '/');
             $depthBonus = max(0.0, (10.0 - $depth) * 0.5);
 
-            $compositeScore = ($status !== null ? 10000.0 : 0.0) + $frecencyScore + $depthBonus;
+            // Tier 5: Severe penalty for lockfiles & minified code (-5,000)
+            $noisePenalty = $noise !== null ? -5000.0 : 0.0;
+
+            $compositeScore = $gitBonus + $coverageBonus + $frecencyScore + $depthBonus + $noisePenalty;
 
             $scored[$file] = [
                 'status' => $status,
                 'frecency' => $frecencyScore,
+                'noise' => $noise,
+                'matchedPatterns' => $matchedPatterns,
                 'score' => $compositeScore,
                 'matches' => $matches,
             ];
@@ -379,8 +418,14 @@ final class FastGrep
             $badges = [];
             if ($data['status'] !== null) {
                 $badges[] = "git: {$data['status']}";
+            } elseif ($data['noise'] !== null) {
+                $badges[] = "noise: {$data['noise']}";
             } elseif ($data['frecency'] >= 20.0) {
                 $badges[] = 'hot';
+            }
+
+            if ($data['matchedPatterns'] > 1) {
+                $badges[] = "{$data['matchedPatterns']}/" . count($patterns) . ' terms';
             }
 
             $badgeStr = $badges !== [] ? ' [' . implode(', ', $badges) . ']' : '';
@@ -414,10 +459,12 @@ final class FastGrep
             $output .= "\n";
         }
 
-        // Record hits for the files presented to the agent
+        // Record hits for clean files presented to the agent (skip noise files)
         if ($this->frecency !== null) {
             foreach ($hitFiles as $f) {
-                $this->frecency->recordHit($f);
+                if (self::noiseCategory($f) === null) {
+                    $this->frecency->recordHit($f);
+                }
             }
             $this->frecency->save();
         }

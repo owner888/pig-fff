@@ -7,10 +7,13 @@ Provides high-performance `ffgrep` and `fffind` tools that prioritize active, mo
 ## Key Features
 
 - **⚡ Real-Time Git-Aware Boosting**: Files currently modified, staged, or untracked in Git are boosted to the very top of search results with explicit `[git: status]` badges. The agent sees changes immediately.
-- **🧠 IME-Style Frecency Memory**: Automatically learns file access patterns and query hits across sessions (stored in `~/.pig/agent/fff-frecency.json`). Frequently and recently examined files earn a `[hot]` badge and climb up the rankings, just like your favorite IME candidate words.
+- **🧠 IME-Style Frecency Memory (CWD-Scoped)**: Automatically learns file access patterns and query hits per workspace root (`~/.pig/agent/fff-frecency.json`). Frequently and recently examined files earn a `[hot]` badge and climb up rankings without cross-project pollution.
+- **🔄 Read/Write Lifecycle Hook**: Hooks directly into pig's tool lifecycle (`tool_result`). Files touched by `edit`, `write` (5x boost) or `read` (2x boost) are instantly boosted in subsequent searches for seamless context continuity.
+- **🔇 Intelligent Noise & Lockfile Sinking**: Automatically detects lockfiles (`composer.lock`, `package-lock.json`), minified scripts (`*.min.js`), and build maps, slapping a -5,000 penalty so massive non-code files never flood top results or waste tokens.
+- **🐪 CamelCase & Acronym Matching for `fffind`**: Type `REM` or `REMiddleware` to immediately target `ResponseEnvelopeMiddleware.php`; type `ACHandler` to find `ActivationCodeHandler.php`.
+- **🎯 Multi-Pattern Coverage Boosting**: Searching with `patterns: ["Order", "Pay", "Status"]` rewards files containing multiple matching terms (e.g. `[3/3 terms]`) to rank high-density files first.
 - **🛡️ 100% Stateless & Zero Cache Drift**: Unlike in-memory pre-indexed engines that desync when external agents (like Claude or IDEs) modify code, `pig-fff` inspects real-time Git status alongside disk contents. No stale cache, zero manual rescan needed.
 - **🚀 Dual-Engine Execution**: Powered by `ripgrep` (`rg`) and `fd` when available on the host machine for microsecond-level scans, with pure PHP fallback when external binaries are not present.
-- **🔍 Multi-Pattern OR Search**: Supports searching multiple literal patterns simultaneously using `patterns: ["Foo", "Bar"]`.
 - **📦 Zero C/Rust Binary Extensions**: Pure PHP 8.3/8.4+ implementation with zero compilation overhead.
 
 ## Installation

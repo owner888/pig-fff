@@ -7,10 +7,13 @@
 ## 核心特性
 
 - **⚡ 实时 Git 状态加权（Git-Aware Boosting）**：工作区中处于修改（modified）、暂存（staged）或未跟踪（untracked）状态的文件，会被自动强行置顶，并带有清晰的 `[git: status]` 徽标。Agent 第一眼即可看到当前正在变更的代码。
-- **🧠 输入法式词频记忆（IME-Style Frecency Memory）**：跨会话自动沉淀文件检索与命中频次（保存在 `~/.pig/agent/fff-frecency.json`）。经常触达和近期访问的核心代码会自动获得 `[hot]` 标签并优先前排展示，就像输入法记住你常用词一样，越用越懂你的项目结构。
+- **🧠 输入法式词频记忆（按项目 CWD 严格隔离）**：跨会话自动沉淀文件检索与命中频次（保存在 `~/.pig/agent/fff-frecency.json`）。经常触达和近期访问的核心代码会自动获得 `[hot]` 标签并优先前排展示；各项目工作区严格隔离，换项目绝不串词。
+- **🔄 读写生命周期闭环联动（Lifecycle Hook）**：通过挂载 pig 的 `tool_result` 钩子，Agent 刚执行过 `edit`、`write`（5倍暴涨权重）或 `read`（2倍权重）的文件，热度瞬间拉满，后续几小时内相关检索必定稳居第一行。
+- **🔇 智能降噪与锁文件沉底（Noise Sinking）**：自动识别 `composer.lock`、`package-lock.json`、`*.min.js`、`*.map` 等无业务意义的大文件并执行 -5,000 分严厉扣分，强制沉底，彻底杜绝垃圾文件霸占输出或撑爆 Token。
+- **🐪 驼峰首字母缩写智能匹配（CamelCase Matcher for `fffind`）**：输入 `REM` 或 `REMiddleware` 直接秒出 `ResponseEnvelopeMiddleware.php`；输入 `ACHandler` 直接命中 `ActivationCodeHandler.php`，大幅提升模糊查找文件的命中率。
+- **🎯 多词检索覆盖度加权（Pattern Coverage Boost）**：当传入 `patterns: ["Order", "Pay", "Status"]` 时，同时涵盖多个关键词的核心文件优先置顶展示，带有清晰的 `[3/3 terms]` 标识。
 - **🛡️ 纯无状态设计，零缓存脱节**：不同于常驻内存、外部代码改动后容易过期的静态预索引引擎，`pig-fff` 每次检索均实时结合 Git 状态与真实磁盘数据。即使 Claude、IDE 或外部脚本在后台高频生成或修改代码，也绝对不会发生“查不到新代码”的缓存漂移，告别手动刷新。
 - **🚀 双引擎加持**：优先调用宿主机的 `ripgrep` (`rg`) 与 `fd` 执行微秒级物理扫描；若外部工具不存在，自动平滑退避至纯 PHP 高性能迭代器。
-- **🔍 多模式 OR 并行检索**：支持结构化入参 `patterns: ["Foo", "Bar"]`，无需手工拼凑复杂正则即可同时匹配多组关键词。
 - **📦 零 C/Rust 动态库编译依赖**：纯 PHP 8.3/8.4+ 实现，开箱即用，零配置负担。
 
 ## 安装方式

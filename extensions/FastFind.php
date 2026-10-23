@@ -6,6 +6,8 @@ namespace PigFff;
 
 use RuntimeException;
 
+require_once __DIR__ . '/FastGrep.php';
+
 /**
  * High-performance, Git-aware file search engine (fffind).
  */
@@ -162,10 +164,47 @@ final class FastFind
                 if (count($results) >= $max) {
                     break;
                 }
+            } elseif (self::matchesCamelCase($pattern, $filename)) {
+                $results[] = $rel;
+                if (count($results) >= $max) {
+                    break;
+                }
             }
         }
 
         return $results;
+    }
+
+    public static function matchesCamelCase(string $pattern, string $filename): bool
+    {
+        $stem = pathinfo($filename, PATHINFO_FILENAME);
+        $words = preg_split('/(?=[A-Z])/', $stem, -1, PREG_SPLIT_NO_EMPTY);
+        if ($words === false || count($words) < 2) {
+            return false;
+        }
+
+        // 1. Pure acronym matching: e.g. "REM" matches "ResponseEnvelopeMiddleware"
+        $acronym = '';
+        foreach ($words as $w) {
+            $acronym .= $w[0];
+        }
+        if (strcasecmp($pattern, $acronym) === 0) {
+            return true;
+        }
+
+        // 2. Prefix acronym + suffix word matching: e.g. "ACHandler" or "REMiddleware"
+        for ($i = 1; $i < count($words); $i++) {
+            $prefixAcronym = '';
+            for ($j = 0; $j < $i; $j++) {
+                $prefixAcronym .= $words[$j][0];
+            }
+            $suffix = implode('', array_slice($words, $i));
+            if (strcasecmp($pattern, $prefixAcronym . $suffix) === 0) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function toRelative(string $absPath): string
@@ -178,7 +217,8 @@ final class FastFind
     }
 
     /**
-     * Rank results: Git-modified files at top, followed by frecency-scored hot files.
+     * Rank results: Git-modified files at top, followed by CamelCase matches, frecency hot files,
+     * and sinking noise/lockfiles to the bottom.
      *
      * @param list<string> $files
      * @return array{content: string, totalFiles: int, gitBoostedFiles: int}
@@ -195,24 +235,31 @@ final class FastFind
             ];
         }
 
-        /** @var array<string, array{path: string, status: ?string, frecency: float, score: float}> $scored */
+        /** @var array<string, array{path: string, status: ?string, noise: ?string, frecency: float, score: float}> $scored */
         $scored = [];
 
         foreach ($files as $file) {
             $status = $this->git->statusOf($file);
             $frecencyScore = $this->frecency?->scoreOf($file) ?? 0.0;
+            $noise = FastGrep::noiseCategory($file);
 
             // Tier 1: Git-modified files (+10,000)
+            $gitBonus = $status !== null ? 10000.0 : 0.0;
+
             // Tier 2: Frecency score
             // Tier 3: Shallow paths
             $depth = substr_count($file, '/');
             $depthBonus = max(0.0, (10.0 - $depth) * 0.5);
 
-            $compositeScore = ($status !== null ? 10000.0 : 0.0) + $frecencyScore + $depthBonus;
+            // Tier 4: Noise penalty (-5,000)
+            $noisePenalty = $noise !== null ? -5000.0 : 0.0;
+
+            $compositeScore = $gitBonus + $frecencyScore + $depthBonus + $noisePenalty;
 
             $scored[$file] = [
                 'path' => $file,
                 'status' => $status,
+                'noise' => $noise,
                 'frecency' => $frecencyScore,
                 'score' => $compositeScore,
             ];
@@ -234,6 +281,8 @@ final class FastFind
             if ($item['status'] !== null) {
                 $badges[] = "git: {$item['status']}";
                 $boostedCount++;
+            } elseif ($item['noise'] !== null) {
+                $badges[] = "noise: {$item['noise']}";
             } elseif ($item['frecency'] >= 20.0) {
                 $badges[] = 'hot';
             }
@@ -246,7 +295,9 @@ final class FastFind
 
         if ($this->frecency !== null) {
             foreach ($hitFiles as $f) {
-                $this->frecency->recordHit($f);
+                if (FastGrep::noiseCategory($f) === null) {
+                    $this->frecency->recordHit($f);
+                }
             }
             $this->frecency->save();
         }
