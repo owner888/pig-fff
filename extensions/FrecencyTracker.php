@@ -35,10 +35,15 @@ final class FrecencyTracker
     /** Whether the store has been read yet: on first use, not at construction, so startup reads nothing. */
     private bool $loaded = false;
 
+    /**
+     * @param (\Closure(): bool)|null $isPrivate whether the session is private (pig's `--incognito`,
+     *        `/incognito`): asked at each hit, and while it says yes nothing is recorded or saved
+     */
     public function __construct(
         private readonly string $storageFile,
         string $cwd,
         private readonly int $maxEntriesPerScope = 300,
+        private readonly ?\Closure $isPrivate = null,
     ) {
         $this->scopeKey = realpath($cwd) ?: $cwd;
     }
@@ -77,6 +82,11 @@ final class FrecencyTracker
      */
     public function recordHit(string $relPath, int $weight = 1): void
     {
+        // A private session leaves no trace of which files it looked at.
+        if ($this->isPrivate !== null && ($this->isPrivate)()) {
+            return;
+        }
+
         $this->ensureLoaded();
         $clean = ltrim($relPath, './');
         if ($clean === '') {
