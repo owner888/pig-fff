@@ -32,13 +32,23 @@ final class FrecencyTracker
     private readonly string $scopeKey;
     private bool $dirty = false;
 
+    /** Whether the store has been read yet: on first use, not at construction, so startup reads nothing. */
+    private bool $loaded = false;
+
     public function __construct(
         private readonly string $storageFile,
         string $cwd,
         private readonly int $maxEntriesPerScope = 300,
     ) {
         $this->scopeKey = realpath($cwd) ?: $cwd;
-        $this->load();
+    }
+
+    private function ensureLoaded(): void
+    {
+        if (!$this->loaded) {
+            $this->loaded = true;
+            $this->load();
+        }
     }
 
     /**
@@ -67,6 +77,7 @@ final class FrecencyTracker
      */
     public function recordHit(string $relPath, int $weight = 1): void
     {
+        $this->ensureLoaded();
         $clean = ltrim($relPath, './');
         if ($clean === '') {
             return;
@@ -94,6 +105,7 @@ final class FrecencyTracker
      */
     public function scoreOf(string $relPath): float
     {
+        $this->ensureLoaded();
         $clean = ltrim($relPath, './');
         if (!isset($this->records[$clean])) {
             return 0.0;
@@ -205,6 +217,7 @@ final class FrecencyTracker
      */
     public function topEntries(int $limit = 10): array
     {
+        $this->ensureLoaded();
         $scored = [];
         foreach ($this->records as $path => $record) {
             $scored[$path] = [

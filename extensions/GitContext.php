@@ -23,9 +23,11 @@ final class GitContext implements GitStatusProvider
 
     private bool $isGitRepo = false;
 
+    /** Whether `git status` has been read yet: not at construction, so loading the extension runs no git. */
+    private bool $loaded = false;
+
     public function __construct(private readonly string $cwd)
     {
-        $this->refresh();
     }
 
     /**
@@ -33,6 +35,7 @@ final class GitContext implements GitStatusProvider
      */
     public function refresh(): void
     {
+        $this->loaded = true;
         $this->statusMap = [];
         $this->isGitRepo = false;
 
@@ -98,6 +101,8 @@ final class GitContext implements GitStatusProvider
 
     public function isGitRepository(): bool
     {
+        $this->loaded || $this->refresh();
+
         return $this->isGitRepo;
     }
 
@@ -106,6 +111,7 @@ final class GitContext implements GitStatusProvider
      */
     public function statusOf(string $relPath): ?string
     {
+        $this->loaded || $this->refresh();
         $clean = ltrim($relPath, './');
         return $this->statusMap[$clean] ?? null;
     }
@@ -115,6 +121,8 @@ final class GitContext implements GitStatusProvider
      */
     public function allChanges(): array
     {
+        $this->loaded || $this->refresh();
+
         return $this->statusMap;
     }
 }
