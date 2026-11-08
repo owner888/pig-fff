@@ -7,7 +7,7 @@ use Pig\Ai\TextContent;
 use Pig\Async\AbortSignal;
 use Pig\CodingAgent\CustomTools\CustomTool;
 use Pig\CodingAgent\Extensions\ExtensionApi;
-use Pig\CodingAgent\Hooks\HookContext;
+use Pig\CodingAgent\Extensions\ExtensionContext;
 use PigFff\FastFind;
 use PigFff\FastGrep;
 use PigFff\FrecencyTracker;
@@ -25,20 +25,20 @@ require_once __DIR__ . '/FastFind.php';
  * Provides `ffgrep` and `fffind` with instant Git-state boosting and
  * input-method style Frecency (Frequency + Recency) ranking.
  */
-return static function (ExtensionApi $pi): void {
+return static function (ExtensionApi $pig): void {
     $cwd = getcwd() ?: '.';
     $git = new GitContext($cwd);
     // A pig from before `isIncognito()` has no private sessions to respect.
     $frecency = new FrecencyTracker(
         FrecencyTracker::defaultStorageFile(),
         $cwd,
-        isPrivate: method_exists($pi, 'isIncognito') ? static fn (): bool => $pi->isIncognito() : null,
+        isPrivate: method_exists($pig, 'isIncognito') ? static fn (): bool => $pig->isIncognito() : null,
     );
     $grepEngine = new FastGrep($cwd, $git, $frecency);
     $findEngine = new FastFind($cwd, $git, $frecency);
 
     // 1. Tool: ffgrep (Content Search with Git-Aware Boosting)
-    $pi->registerTool(new CustomTool(
+    $pig->registerTool(new CustomTool(
         name: 'ffgrep',
         label: 'Fast Smart Grep',
         description: 'Search file contents with ripgrep and real-time Git-aware ranking. '
@@ -86,7 +86,7 @@ return static function (ExtensionApi $pi): void {
             string $id,
             array $params,
             ?Closure $onUpdate,
-            HookContext $ctx,
+            ExtensionContext $ctx,
             ?AbortSignal $signal,
         ) use ($grepEngine): AgentToolResult {
             $signal?->throwIfAborted();
@@ -107,7 +107,7 @@ return static function (ExtensionApi $pi): void {
     ));
 
     // 2. Tool: fffind (File Path Search with Git-Aware Boosting)
-    $pi->registerTool(new CustomTool(
+    $pig->registerTool(new CustomTool(
         name: 'fffind',
         label: 'Fast Smart Find',
         description: 'Find files by name or glob pattern with real-time Git-aware ranking. '
@@ -134,7 +134,7 @@ return static function (ExtensionApi $pi): void {
             string $id,
             array $params,
             ?Closure $onUpdate,
-            HookContext $ctx,
+            ExtensionContext $ctx,
             ?AbortSignal $signal,
         ) use ($findEngine): AgentToolResult {
             $signal?->throwIfAborted();
@@ -155,9 +155,9 @@ return static function (ExtensionApi $pi): void {
     ));
 
     // 3. Command: /fff-status
-    $pi->registerCommand(
+    $pig->registerCommand(
         'fff-status',
-        static function (string $args, HookContext $ctx) use ($git, $frecency): void {
+        static function (string $args, ExtensionContext $ctx) use ($git, $frecency): void {
             $git->refresh();
             $changes = $git->allChanges();
             $repo = $git->isGitRepository() ? 'Yes' : 'No';
@@ -202,7 +202,7 @@ return static function (ExtensionApi $pi): void {
     );
 
     // 4. Hook: Auto-boost files directly read, edited, or written by the agent
-    $pi->on('tool_result', static function ($event) use ($frecency, $cwd): void {
+    $pig->on('tool_result', static function ($event) use ($frecency, $cwd): void {
         if ($event->isError || !in_array($event->toolName, ['read', 'edit', 'write'], true)) {
             return;
         }
