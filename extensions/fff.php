@@ -5,7 +5,7 @@ declare(strict_types=1);
 use Pig\Agent\AgentToolResult;
 use Pig\Ai\TextContent;
 use Pig\Async\AbortSignal;
-use Pig\CodingAgent\CustomTools\CustomTool;
+use Pig\CodingAgent\Extensions\ToolDefinition;
 use Pig\CodingAgent\Extensions\ExtensionApi;
 use Pig\CodingAgent\Extensions\ExtensionContext;
 use PigFff\FastFind;
@@ -38,7 +38,7 @@ return static function (ExtensionApi $pig): void {
     $findEngine = new FastFind($cwd, $git, $frecency);
 
     // 1. Tool: ffgrep (Content Search with Git-Aware Boosting)
-    $pig->registerTool(new CustomTool(
+    $pig->registerTool(new ToolDefinition(
         name: 'ffgrep',
         label: 'Fast Smart Grep',
         description: 'Search file contents with ripgrep and real-time Git-aware ranking. '
@@ -107,7 +107,7 @@ return static function (ExtensionApi $pig): void {
     ));
 
     // 2. Tool: fffind (File Path Search with Git-Aware Boosting)
-    $pig->registerTool(new CustomTool(
+    $pig->registerTool(new ToolDefinition(
         name: 'fffind',
         label: 'Fast Smart Find',
         description: 'Find files by name or glob pattern with real-time Git-aware ranking. '
